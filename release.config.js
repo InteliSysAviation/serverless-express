@@ -1,4 +1,7 @@
 module.exports = {
+  ci: false, // only run the builds locally
+  debug: true, // output debugging information
+  repositoryUrl: 'git@github.com:InteliSysAviation/serverless-express.git',
   branches: [
     'mainline'
   ],
@@ -19,7 +22,10 @@ module.exports = {
     [
       '@semantic-release/npm',
       {
-        npmPublish: true,
+        // Do not publish the npm package to the registry.
+        // Setting npmPublish to false is not necessary since the package.json 'private' property is true,
+        // it's nice to be explicit about it.
+        npmPublish: false,
         tarballDir: 'dist'
       }
     ],
