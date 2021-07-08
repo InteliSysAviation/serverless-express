@@ -10,11 +10,17 @@ function getRequestValuesFromApiGatewayEvent ({ event }) {
     cookies
   } = event
   const method = requestContext.http.method
+  // Experimentation shows that:
+  //  * requestPath is always undefined
+  //  * rawPath is NOT URL encoded
+  //  * rawQueryString IS URL encoded
+  // express expects the path to be URL encoded.
+  // Also interesting, is that rawQueryString is
   const requestPathOrRawPath = requestPath || rawPath
   const basePath = '' // TODO: Test with custom domain
   const stripBasePathRegex = new RegExp(`^${basePath}`)
   const path = url.format({
-    pathname: requestPathOrRawPath.replace(stripBasePathRegex, ''),
+    pathname: encodeURI(requestPathOrRawPath).replace(stripBasePathRegex, ''),
     search: rawQueryString
   })
 

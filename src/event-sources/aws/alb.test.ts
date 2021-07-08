@@ -233,21 +233,6 @@ describe("getEventSourceNameBasedOnEvent", () => {
   });
 });
 
-describe("urlDecodePath", () => {
-  test("empty path", () => {
-    const result = awsAlbEventSource.private.urlDecodePath("");
-    expect(result).toEqual("");
-  });
-  test("path with one component and a non-ascii unicode character", () => {
-    const result = awsAlbEventSource.private.urlDecodePath("/pp%C2%A5pp");
-    expect(result).toEqual("/pp¥pp");
-  });
-  test("path with multiple components, a non-ascii unicode character, and a trailing path separator", () => {
-    const result = awsAlbEventSource.private.urlDecodePath("/pp%C2%A5pp/2/last/");
-    expect(result).toEqual("/pp¥pp/2/last/");
-  });
-});
-
 describe("getHeaders", () => {
   test("from an ELB event with multi value headers disabled", () => {
     const result = awsAlbEventSource.private.getHeaders(alb_get_without_mvh_event);

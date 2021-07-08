@@ -9,17 +9,6 @@ const { getEventBody, getMultiValueHeaders } = require('../utils')
 //     array of values, even if there is only one corresponding value for the given querystring paramter.
 //   * Empty headers (i.e. those with only a whitespace value) are not transmitted through to the lambda.
 
-// It is assumed that the path argument does not have a querystring
-function urlDecodePath (path) {
-  const pathSeperator = '/'
-  const pathComponents = path.split(pathSeperator)
-  let decodedPath = ''
-  for (let i = 0; i < pathComponents.length; i++) {
-    decodedPath += decodeURIComponent(pathComponents[i]) + pathSeperator
-  }
-  return pathComponents.length > 0 ? decodedPath.slice(0, decodedPath.length - 1) : ''
-}
-
 // Return an simple { [string]: string } object in the shape that would be expected for headers provided in a request
 // to the Express application, given the incoming ELB event.
 function getHeaders (event) {
@@ -85,8 +74,6 @@ function constructRawQueryString (event) {
 
 // Completely changing the implementation of this based on the observed shape of an event coming from ELB.
 // Events coming from AWS Elastic Load Balancers do not automatically urldecode query parameters (unlike API Gateway).
-// So we need to check for that and automatically decode them to normalize the request between the two.
-// In addition, the path appears to be URL encoded.
 const getRequestValuesFromAlbEvent = ({ event }) => {
   const headers = getHeaders(event)
 
@@ -101,7 +88,8 @@ const getRequestValuesFromAlbEvent = ({ event }) => {
     body: body,
     remoteAddress: getRemoteAddress(event),
     path: url.format({
-      pathname: urlDecodePath(event.path),
+      // Experimentation shows that that event.path when originating from ELB is already URL encoded (which express expects)
+      pathname: event.path,
       search: constructRawQueryString(event)
     })
   }
@@ -129,7 +117,6 @@ module.exports = {
 
   // The following are really private to this module, but are exported to permit jest testability
   private: {
-    urlDecodePath: urlDecodePath,
     getHeaders: getHeaders,
     getRemoteAddress: getRemoteAddress,
     constructRawQueryString: constructRawQueryString,
