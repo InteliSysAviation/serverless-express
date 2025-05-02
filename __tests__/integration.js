@@ -4,12 +4,12 @@ const express = require('express')
 const bodyParser = require('body-parser')
 const ejs = require('ejs').__express
 const serverlessExpress = require('../src/index')
+const serverlessExpressLogger = require('../src/logger')
 const {
   makeEvent,
   makeResponse,
   EACH_MATRIX
 } = require('../jest-helpers')
-
 const jestHelpersPath = path.join(__dirname, '..', 'jest-helpers')
 
 let app, router, serverlessExpressInstance
@@ -103,6 +103,40 @@ describe.each(EACH_MATRIX)('%s:%s: integration tests', (eventSourceName, framewo
     expect(response).toEqual(expectedResponse)
   })
 
+  test('headers get lowercased', async () => {
+    app = express()
+    router = express.Router()
+    app.use('/', router)
+    serverlessExpressInstance = serverlessExpress({ app })
+    router.get('/foo', (req, res) => {
+      const xHeaders = Object.fromEntries(
+        Object.entries(req.headers).filter(([name]) => name.startsWith('x-header-'))
+      )
+      res.json({ xHeaders })
+    })
+    const event = makeEvent({
+      eventSourceName: 'apiGatewayV1',
+      path: '/foo',
+      httpMethod: 'GET',
+      multiValueHeaders: undefined,
+      headers: {
+        'X-Header-One': 'Value1',
+        'x-header-two': 'Value2'
+      }
+    })
+    const response = await serverlessExpressInstance(event)
+    const expectedResponse = makeResponse({
+      eventSourceName: 'apiGatewayV1',
+      body: JSON.stringify({
+        xHeaders: {
+          'x-header-one': 'Value1',
+          'x-header-two': 'Value2'
+        }
+      })
+    })
+    expect(response).toMatchObject(expectedResponse)
+  })
+
   test('resolutionMode = CALLBACK', (done) => {
     const jsonResponse = { data: { name: 'Brett' } }
     router.get('/users', (req, res) => {
@@ -168,7 +202,7 @@ describe.each(EACH_MATRIX)('%s:%s: integration tests', (eventSourceName, framewo
     const expectedResponse = makeResponse({
       eventSourceName,
       multiValueHeaders: {
-        'content-length': [151],
+        'content-length': ['151'],
         'content-security-policy': ["default-src 'none'"],
         'content-type': ['text/html; charset=utf-8'],
         'x-content-type-options': ['nosniff']
@@ -223,7 +257,7 @@ describe.each(EACH_MATRIX)('%s:%s: integration tests', (eventSourceName, framewo
       multiValueHeaders: {
         'accept-ranges': ['bytes'],
         'cache-control': ['public, max-age=0'],
-        'content-length': [15933],
+        'content-length': ['15933'],
         'content-type': ['image/png']
       },
       isBase64Encoded: true
@@ -239,6 +273,15 @@ describe.each(EACH_MATRIX)('%s:%s: integration tests', (eventSourceName, framewo
         expect(response.multiValueHeaders['last-modified'][0]).toMatch(lastModifiedRegex)
         delete response.multiValueHeaders.etag
         delete response.multiValueHeaders['last-modified']
+        break
+      case 'azureHttpFunctionV4':
+      case 'azureHttpFunctionV3':
+        expectedResponse.body = Buffer.from(samLogoBase64, 'base64')
+        expectedResponse.isBase64Encoded = false
+        expect(response.headers.etag).toMatch(etagRegex)
+        expect(response.headers['last-modified']).toMatch(lastModifiedRegex)
+        delete response.headers.etag
+        delete response.headers['last-modified']
         break
       case 'apiGatewayV2':
         expect(response.headers.etag).toMatch(etagRegex)
@@ -278,7 +321,7 @@ describe.each(EACH_MATRIX)('%s:%s: integration tests', (eventSourceName, framewo
     const response = await serverlessExpressInstance(event)
     const expectedResponse = makeResponse({
       eventSourceName,
-      body: JSON.stringify({ data: { name: name } }),
+      body: JSON.stringify({ data: { name } }),
       multiValueHeaders: {
         'content-length': ['29'],
         etag: ['W/"1d-9ERga12t1e/5eBdg3k9zfIvAfWo"']
@@ -354,7 +397,7 @@ describe.each(EACH_MATRIX)('%s:%s: integration tests', (eventSourceName, framewo
       eventSourceName,
       path: '/users/2',
       httpMethod: 'PUT',
-      body: global.btoa(JSON.stringify({ name })),
+      body: Buffer.from(JSON.stringify({ name }), 'binary').toString('base64'),
       isBase64Encoded: true,
       multiValueHeaders: {
         'content-type': ['application/json']
@@ -387,8 +430,17 @@ describe.each(EACH_MATRIX)('%s:%s: integration tests', (eventSourceName, framewo
   })
 
   test('set-cookie', async () => {
+    const now = new Date(2022, 7, 11, 3, 30, 30)
+    const maxAge = 3000
+    const expires = new Date(+now + maxAge)
+    const expectedExpires = expires.toUTCString()
+
+    jest.useFakeTimers('modern')
+    jest.setSystemTime(now)
+
     router.get('/cookie', (req, res) => {
-      res.cookie('Foo', 'bar')
+      res.cookie('Zoo', 'boo', { domain: 'mafoo.com', secure: true, httpOnly: true, sameSite: 'Strict', maxAge })
+      res.cookie('Foo', 'bar', { domain: 'example.com', secure: true, httpOnly: true, sameSite: 'Strict' })
       res.cookie('Fizz', 'buzz')
       res.json({})
     })
@@ -400,7 +452,8 @@ describe.each(EACH_MATRIX)('%s:%s: integration tests', (eventSourceName, framewo
     const response = await serverlessExpressInstance(event)
 
     const expectedSetCookieHeaders = [
-      'Foo=bar; Path=/',
+      `Zoo=boo; Max-Age=3; Domain=mafoo.com; Path=/; Expires=${expectedExpires}; HttpOnly; Secure; SameSite=Strict`,
+      'Foo=bar; Domain=example.com; Path=/; HttpOnly; Secure; SameSite=Strict',
       'Fizz=buzz; Path=/'
     ]
     const expectedResponse = makeResponse({
@@ -414,42 +467,221 @@ describe.each(EACH_MATRIX)('%s:%s: integration tests', (eventSourceName, framewo
       },
       statusCode: 200
     })
+
+    jest.useRealTimers()
+
+    switch (eventSourceName) {
+      case 'azureHttpFunctionV4':
+      case 'azureHttpFunctionV3':
+        expectedResponse.cookies = [
+          {
+            domain: 'mafoo.com',
+            httpOnly: true,
+            name: 'Zoo',
+            path: '/',
+            sameSite: 'Strict',
+            secure: true,
+            value: 'boo',
+            maxAge: maxAge / 1000,
+            expires
+          },
+          {
+            domain: 'example.com',
+            httpOnly: true,
+            name: 'Foo',
+            path: '/',
+            sameSite: 'Strict',
+            secure: true,
+            value: 'bar'
+          },
+          { name: 'Fizz', path: '/', value: 'buzz' }
+        ]
+        break
+    }
+
     expect(response).toEqual(expectedResponse)
   })
 
-  test('custom logger', async () => {
-    app = express()
-    router = express.Router()
-    app.use('/', router)
-    router.get('/users', (req, res) => {
-      res.json({})
+  describe('logger', () => {
+    const mocks = []
+
+    beforeEach(() => {
+      const mockMethods = [
+        'error',
+        'info',
+        'warn',
+        'log',
+        'debug'
+      ]
+
+      for (const method of mockMethods) { mocks.push(jest.spyOn(global.console, method).mockImplementation()) }
     })
-    const event = makeEvent({
-      eventSourceName,
-      path: '/users',
-      httpMethod: 'GET'
+
+    afterEach(() => {
+      for (const mock of mocks) mock.mockRestore()
     })
-    const customLogger = {
-      error: jest.fn(),
-      warn: jest.fn(),
-      info: jest.fn(),
-      verbose: jest.fn(),
-      debug: jest.fn()
-    }
-    serverlessExpressInstance = serverlessExpress({ app, log: customLogger })
-    await serverlessExpressInstance(event)
 
-    expect(customLogger.debug.mock.calls.length).toBe(6)
+    test('custom logger', async () => {
+      app = express()
+      router = express.Router()
+      app.use('/', router)
+      router.get('/users', (req, res) => {
+        res.json({})
+      })
+      const event = makeEvent({
+        eventSourceName,
+        path: '/users',
+        httpMethod: 'GET'
+      })
+      const customLogger = {
+        error: jest.fn(),
+        warn: jest.fn(),
+        info: jest.fn(),
+        verbose: jest.fn(),
+        debug: jest.fn()
+      }
+      serverlessExpressInstance = serverlessExpress({ app, log: customLogger })
+      await serverlessExpressInstance(event)
 
-    // TODO: test log levels
-    // customLogger.level = 'error'
-    // customLogger.debug.mockClear()
-    // customLogger.debug.mockReset()
-    // customLogger.debug = jest.fn()
+      expect(customLogger.debug.mock.calls.length).toBe(6)
 
-    // serverlessExpressInstance = serverlessExpress({ app, log: customLogger })
-    // await serverlessExpressInstance(event)
-    // expect(customLogger.debug.mock.calls.length).toBe(0)
+      // TODO: test log levels
+      // customLogger.level = 'error'
+      // customLogger.debug.mockClear()
+      // customLogger.debug.mockReset()
+      // customLogger.debug = jest.fn()
+
+      // serverlessExpressInstance = serverlessExpress({ app, log: customLogger })
+      // await serverlessExpressInstance(event)
+      // expect(customLogger.debug.mock.calls.length).toBe(0)
+    })
+
+    test('custom levels', () => {
+      const loggerError = serverlessExpressLogger({ level: 'error' })
+
+      loggerError.error('error')
+      loggerError.info('nocall')
+      loggerError.warn('nocall')
+      loggerError.debug('nocall')
+      loggerError.verbose('nocall')
+      expect(global.console.warn).not.toHaveBeenCalled()
+      expect(global.console.debug).not.toHaveBeenCalled()
+      expect(global.console.info).not.toHaveBeenCalled()
+      expect(global.console.error).toHaveBeenLastCalledWith({
+        message: 'error'
+      })
+
+      const loggerWarn = serverlessExpressLogger({ level: 'warn' })
+
+      loggerWarn.error('error2')
+      loggerWarn.warn('warn2')
+      loggerWarn.info('nocall')
+      loggerWarn.debug('nocall')
+      loggerWarn.verbose('nocall')
+      expect(global.console.debug).not.toHaveBeenCalled()
+      expect(global.console.info).not.toHaveBeenCalled()
+      expect(global.console.error).toHaveBeenLastCalledWith({
+        message: 'error2'
+      })
+      expect(global.console.warn).toHaveBeenLastCalledWith({
+        message: 'warn2'
+      })
+
+      const loggerInfo = serverlessExpressLogger({ level: 'info' })
+
+      loggerInfo.error('error3')
+      loggerInfo.warn('warn3')
+      loggerInfo.info('info3')
+      loggerInfo.debug('nocall')
+      loggerInfo.verbose('nocall')
+      expect(global.console.debug).not.toHaveBeenCalled()
+      expect(global.console.error).toHaveBeenLastCalledWith({
+        message: 'error3'
+      })
+      expect(global.console.warn).toHaveBeenLastCalledWith({
+        message: 'warn3'
+      })
+      expect(global.console.info).toHaveBeenLastCalledWith({
+        message: 'info3'
+      })
+
+      const loggerVerbose = serverlessExpressLogger({ level: 'verbose' })
+
+      loggerVerbose.error('error4')
+      loggerVerbose.warn('warn4')
+      loggerVerbose.info('info4')
+      loggerVerbose.verbose('verbose4')
+      loggerVerbose.debug('nocall')
+      expect(global.console.error).toHaveBeenLastCalledWith({
+        message: 'error4'
+      })
+      expect(global.console.warn).toHaveBeenLastCalledWith({
+        message: 'warn4'
+      })
+      expect(global.console.info).toHaveBeenLastCalledWith({
+        message: 'info4'
+      })
+      expect(global.console.debug).toHaveBeenLastCalledWith({
+        message: 'verbose4'
+      })
+
+      const loggerDebug = serverlessExpressLogger({ level: 'debug' })
+
+      loggerDebug.error('error5')
+      loggerDebug.warn('warn5')
+      loggerDebug.info('info5')
+      loggerDebug.verbose('verbose5')
+      loggerDebug.debug('debug5')
+      expect(global.console.error).toHaveBeenLastCalledWith({
+        message: 'error5'
+      })
+      expect(global.console.warn).toHaveBeenLastCalledWith({
+        message: 'warn5'
+      })
+      expect(global.console.info).toHaveBeenLastCalledWith({
+        message: 'info5'
+      })
+      expect(global.console.debug).toHaveBeenLastCalledWith({
+        message: 'debug5'
+      })
+    })
+
+    test('lazy print of logger', async () => {
+      const logger = serverlessExpressLogger({ level: 'debug' })
+
+      logger.debug('simple message')
+      logger.debug('debug', () => '=true', ' works')
+      logger.debug(() => 'debug')
+      logger.debug('array', ['message'])
+
+      expect(global.console.debug).toHaveBeenNthCalledWith(
+        1,
+        {
+          message: 'simple message'
+        }
+      )
+      expect(global.console.debug).toHaveBeenNthCalledWith(
+        2,
+        {
+          message: 'debug',
+          0: '=true',
+          1: ' works'
+        }
+      )
+      expect(global.console.debug).toHaveBeenNthCalledWith(
+        3,
+        {
+          message: 'debug'
+        }
+      )
+      expect(global.console.debug).toHaveBeenNthCalledWith(
+        4,
+        {
+          message: 'array',
+          0: ['message']
+        }
+      )
+    })
   })
 
   test('legacy/deprecated createServer', async () => {

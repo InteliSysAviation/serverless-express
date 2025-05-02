@@ -3,7 +3,7 @@ const express = require('express')
 const bodyParser = require('body-parser')
 const cors = require('cors')
 const compression = require('compression')
-const { getCurrentInvoke } = require('@vendia/serverless-express')
+const { getCurrentInvoke } = require('@codegenie/serverless-express')
 const ejs = require('ejs').__express
 const app = express()
 const router = express.Router()
@@ -27,7 +27,7 @@ router.get('/', (req, res) => {
     requestContext = {},
     multiValueHeaders = {}
   } = event
-  const { stage = '' } = requestContext
+  const { stage = 'Stage' } = requestContext
   const {
     Host = ['localhost:3000']
   } = multiValueHeaders
@@ -38,8 +38,8 @@ router.get('/', (req, res) => {
   })
 })
 
-router.get('/vendia', (req, res) => {
-  res.sendFile(path.join(__dirname, 'vendia-logo.png'))
+router.get('/code-genie-logo', (req, res) => {
+  res.sendFile(path.join(__dirname, 'code-genie-logo.png'))
 })
 
 router.get('/users', (req, res) => {

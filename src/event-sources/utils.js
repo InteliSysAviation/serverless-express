@@ -32,7 +32,7 @@ function getRequestValuesFromEvent ({
 
   if (event.multiValueHeaders) {
     headers = getCommaDelimitedHeaders({ headersMap: event.multiValueHeaders, lowerCaseKey: true })
-  } else {
+  } else if (event.headers) {
     headers = event.headers
   }
 
@@ -59,7 +59,7 @@ function getMultiValueHeaders ({ headers }) {
   const multiValueHeaders = {}
 
   Object.entries(headers).forEach(([headerKey, headerValue]) => {
-    const headerArray = Array.isArray(headerValue) ? headerValue : [headerValue]
+    const headerArray = Array.isArray(headerValue) ? headerValue.map(String) : [String(headerValue)]
 
     multiValueHeaders[headerKey.toLowerCase()] = headerArray
   })
@@ -71,9 +71,65 @@ function getEventSourceNameBasedOnEvent ({
   event
 }) {
   if (event.requestContext && event.requestContext.elb) return 'AWS_ALB'
-  if (event.Records) return 'AWS_LAMBDA_EDGE'
+  if (event.eventSource === 'SelfManagedKafka') return 'AWS_SELF_MANAGED_KAFKA'
+  if (event.Records) {
+    const eventSource = event.Records[0] ? event.Records[0].EventSource || event.Records[0].eventSource : undefined
+    if (eventSource === 'aws:sns') {
+      return 'AWS_SNS'
+    }
+    if (eventSource === 'aws:dynamodb') {
+      return 'AWS_DYNAMODB'
+    }
+    if (eventSource === 'aws:sqs') {
+      return 'AWS_SQS'
+    }
+    if (eventSource === 'aws:kinesis') {
+      return 'AWS_KINESIS_DATA_STREAM'
+    }
+    if (eventSource === 'aws:s3') {
+      return 'AWS_S3'
+    }
+    return 'AWS_LAMBDA_EDGE'
+  }
   if (event.requestContext) {
+    // NOTE: Lambda Function URL follows the same format as AWS_API_GATEWAY_V2
     return event.version === '2.0' ? 'AWS_API_GATEWAY_V2' : 'AWS_API_GATEWAY_V1'
+  }
+  if (event.traceContext) {
+    const functionsExtensionVersion = process.env.FUNCTIONS_EXTENSION_VERSION
+
+    if (!functionsExtensionVersion) {
+      console.warn('The environment variable \'FUNCTIONS_EXTENSION_VERSION\' is not set. Only the function runtime \'~3\' is supported.')
+    } else if (functionsExtensionVersion === '~3') {
+      return 'AZURE_HTTP_FUNCTION_V3'
+    } else if (functionsExtensionVersion === '~4') {
+      return 'AZURE_HTTP_FUNCTION_V4'
+    } else {
+      console.warn('The function runtime \'' + functionsExtensionVersion + '\' is not supported. Only \'~3\' and \'~4\' are supported.')
+    }
+  }
+  if (
+    event.version &&
+    event.version === '0' &&
+    event.id &&
+    event['detail-type'] &&
+    event.source &&
+    event.account &&
+    event.time &&
+    event.region &&
+    event.resources &&
+    Array.isArray(event.resources) &&
+    event.detail &&
+    typeof event.detail === 'object' &&
+    !Array.isArray(event.detail)
+  ) {
+    // AWS doesn't have a defining Event Source here, so we're being incredibly selective on the structure
+    // Ref: https://docs.aws.amazon.com/lambda/latest/dg/services-cloudwatchevents.html
+    return 'AWS_EVENTBRIDGE'
+  }
+
+  if (event.context && event.context.Execution && event.context.State && event.context.StateMachine) {
+    return 'AWS_STEP_FUNCTIONS'
   }
 
   throw new Error('Unable to determine event source based on event.')
@@ -95,11 +151,26 @@ function getCommaDelimitedHeaders ({ headersMap, separator = ',', lowerCaseKey =
   return commaDelimitedHeaders
 }
 
+const emptyResponseMapper = () => {}
+
+const parseCookie = (str) =>
+  str.split(';')
+    .map((v) => v.split('='))
+    .reduce((acc, v) => {
+      if (!v[1]) {
+        return acc
+      }
+      acc[decodeURIComponent(v[0].trim().toLowerCase())] = decodeURIComponent(v[1].trim())
+      return acc
+    }, {})
+
 module.exports = {
   getPathWithQueryStringParams,
   getRequestValuesFromEvent,
   getMultiValueHeaders,
   getEventSourceNameBasedOnEvent,
   getEventBody,
-  getCommaDelimitedHeaders
+  getCommaDelimitedHeaders,
+  emptyResponseMapper,
+  parseCookie
 }

@@ -1,111 +1,66 @@
 const url = require('url')
-const { getEventBody, getMultiValueHeaders } = require('../utils')
+const { getRequestValuesFromEvent, getMultiValueHeaders } = require('../utils')
 
-// Overarching ALB notes and observations:
-//   * Header names are always lowercased.
-//   * Events coming from AWS Elastic Load Balancers do not automatically urldecode query parameters (unlike API Gateway).
-//   * If the target group has multi-value headers enabled, multi-value querystring parameters are implicitly also
-//     enabled. Each event.queryStringParameters entry consists of a querystring parameter name and a corresponding
-//     array of values, even if there is only one corresponding value for the given querystring paramter.
-//   * Empty headers (i.e. those with only a whitespace value) are not transmitted through to the lambda.
-
-// Return an simple { [string]: string } object in the shape that would be expected for headers provided in a request
-// to the Express application, given the incoming ELB event.
-function getHeaders (event) {
-  let result = {}
-  if (event.multiValueHeaders) {
-    Object.entries(event.multiValueHeaders).forEach(([name, values]) => {
-      let headerValues = ''
-      for (let i = 0; i < values.length; i++) {
-        headerValues += `${values[i]},`
-      }
-      if (values.length > 0) {
-        headerValues = headerValues.slice(0, headerValues.length - 1) // remove trailing comma
-      }
-      result[name] = headerValues
-    })
-  } else {
-    result = event.headers
-  }
-  return result
-}
-
-// Return the remote address as indicated by the given ELB event. The remote address is provided in the ELB event
-// via an x-forwarded-for HTTP header.
-function getRemoteAddress (event) {
-  let result
-  if (event.multiValueHeaders) {
-    const headerValues = event.multiValueHeaders['x-forwarded-for']
-    if (Array.isArray(headerValues) && headerValues.length > 0) {
-      result = headerValues[0]
-    }
-  } else {
-    // ALB always lowercases header names
-    if (event.headers && typeof event.headers['x-forwarded-for'] === 'string') {
-      result = event.headers['x-forwarded-for']
-    }
-  }
-  return result
-}
-
-// Express expects an incoming path that contains an querystring will all components encoded. An ELB event does
-// not decode the querystring names or values so those can just be used directly to produce the full querystring.
-function constructRawQueryString (event) {
-  let result = ''
+function getPathWithQueryStringUseUnescapeParams ({
+  event,
+  // NOTE: Use `event.pathParameters.proxy` if available ({proxy+}); fall back to `event.path`
+  path = (event.pathParameters && event.pathParameters.proxy && `/${event.pathParameters.proxy}`) || event.path,
+  // NOTE: Strip base path for custom domains
+  stripBasePath = '',
+  replaceRegex = new RegExp(`^${stripBasePath}`)
+}) {
+  const query = {}
+  // decode everything back into utf-8 text.
   if (event.multiValueQueryStringParameters) {
-    Object.entries(event.multiValueQueryStringParameters).forEach(([name, values]) => {
-      for (let i = 0; i < values.length; i++) {
-        result += `${name}=${values[i]}&`
-      }
-    })
-    if (result.length > 0) {
-      result = result.slice(0, result.length - 1) // remove trailing ampersand
+    for (const key in event.multiValueQueryStringParameters) {
+      const formattedKey = decodeUrlencoded(key)
+      query[formattedKey] = event.multiValueQueryStringParameters[key].map(value => decodeUrlencoded(value))
     }
   } else {
-    Object.entries(event.queryStringParameters).forEach(([name, value]) => {
-      result += `${name}=${value}&`
-    })
-    if (result.length > 0) {
-      result = result.slice(0, result.length - 1) // remove trailing ampersand
+    for (const key in event.queryStringParameters) {
+      const formattedKey = decodeUrlencoded(key)
+      query[formattedKey] = decodeUrlencoded(event.queryStringParameters[key])
     }
   }
-  return result
+
+  return url.format({
+    pathname: path.replace(replaceRegex, ''),
+    query
+  })
 }
 
-// Completely changing the implementation of this based on the observed shape of an event coming from ELB.
-// Events coming from AWS Elastic Load Balancers do not automatically urldecode query parameters (unlike API Gateway).
+// Decode an "application/x-www-form-urlencoded" encoded string.
+function decodeUrlencoded (val) {
+  return decodeURIComponent(val.replace(/\+/g, '%20'))
+}
+
 const getRequestValuesFromAlbEvent = ({ event }) => {
-  const headers = getHeaders(event)
-
-  // ALB event always appears to have a body
-  // The toString on the content-length is to make it identical to how it comes in from the APIGW
-  const body = getEventBody({ event })
-  headers['content-length'] = Buffer.byteLength(body, event.isBase64Encoded ? 'base64' : 'utf8')
-
-  return {
-    method: event.httpMethod,
-    headers: headers,
-    body: body,
-    remoteAddress: getRemoteAddress(event),
-    path: url.format({
-      // Experimentation shows that that event.path when originating from ELB is already URL encoded (which express expects)
-      pathname: event.path,
-      search: constructRawQueryString(event)
-    })
-  }
+  const values = getRequestValuesFromEvent({
+    event,
+    path: getPathWithQueryStringUseUnescapeParams({ event })
+  })
+  return values
 }
 
 const getResponseToAlb = ({
+  event,
   statusCode,
   body,
-  headers,
+  headers: responseHeaders,
   isBase64Encoded
 }) => {
-  const multiValueHeaders = getMultiValueHeaders({ headers })
+  const multiValueHeaders = !event.headers ? getMultiValueHeaders({ headers: responseHeaders }) : undefined
+  const headers = event.headers
+    ? Object.entries(responseHeaders).reduce((acc, [k, v]) => {
+      acc[k] = Array.isArray(v) ? v[0] : v
+      return acc
+    }, {})
+    : undefined
 
   return {
     statusCode,
     body,
+    headers,
     multiValueHeaders,
     isBase64Encoded
   }
@@ -113,12 +68,5 @@ const getResponseToAlb = ({
 
 module.exports = {
   getRequest: getRequestValuesFromAlbEvent,
-  getResponse: getResponseToAlb,
-
-  // The following are really private to this module, but are exported to permit jest testability
-  private: {
-    getHeaders: getHeaders,
-    getRemoteAddress: getRemoteAddress,
-    constructRawQueryString: constructRawQueryString,
-  },
+  getResponse: getResponseToAlb
 }
