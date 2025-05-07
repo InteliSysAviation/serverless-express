@@ -1,0 +1,29 @@
+{
+  "name": "Node.js & TypeScript",
+  // For more/newer images, see https://github.com/devcontainers/images/tree/main/src/typescript-node
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:18-bullseye",
+
+  // Features to add to the dev container. More info: https://containers.dev/implementors/features.
+  // "features": {},
+
+  // Use 'forwardPorts' to make a list of ports inside the container available locally.
+  // "forwardPorts": [],
+
+  // Use 'postCreateCommand' to run commands after the container is created.
+  "postCreateCommand": "npm install",
+  "customizations": {
+    "vscode": {
+      "extensions": ["PKief.material-icon-theme", "mhutchie.git-graph"]
+    }
+  },
+  "containerEnv": {
+    "NPM_TOKEN_INTELISYSAVIATION": "${localEnv:NPM_TOKEN_INTELISYSAVIATION}",
+    "NPM_TOKEN_INTELISYSAVIATION_PUBLISH": "${localEnv:NPM_TOKEN_INTELISYSAVIATION_PUBLISH}"
+  }
+
+  // Configure tool-specific properties.
+  // "customizations": {},
+
+  // Uncomment to connect as root instead. More info: https://aka.ms/dev-containers-non-root.
+  // "remoteUser": "root"
+}

@@ -1,7 +1,7 @@
 {
-  "name": "@codegenie/serverless-express",
-  "version": "4.16.0",
-  "description": "This library enables you to utilize AWS Lambda and Amazon API Gateway to respond to web and API requests using your existing Node.js application framework.",
+  "name": "@intelisysaviation/serverless-express",
+  "version": "1.0.0",
+  "description": "This library enables InteliSys to utilize AWS Lambda and Amazon API Gateway to respond to web and API requests using the Node.js application framework.",
   "keywords": [
     "aws",
     "serverless",
@@ -14,9 +14,9 @@
     "node.js",
     "http"
   ],
-  "homepage": "https://github.com/CodeGenieApp/serverless-express",
+  "homepage": "https://github.com/InteliSysAviation/serverless-express",
   "bugs": {
-    "url": "https://github.com/CodeGenieApp/serverless-express/issues"
+    "url": "https://github.com/InteliSysAviation/serverless-express/issues"
   },
   "license": "Apache-2.0",
   "files": [
@@ -25,7 +25,7 @@
   "main": "src/index.js",
   "repository": {
     "type": "git",
-    "url": "https://github.com/CodeGenieApp/serverless-express.git"
+    "url": "https://github.com/InteliSysAviation/serverless-express.git"
   },
   "engines": {
     "node": ">=18"
