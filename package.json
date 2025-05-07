@@ -30,9 +30,6 @@
   "engines": {
     "node": ">=18"
   },
-  "publishConfig": {
-    "access": "public"
-  },
   "lint-staged": {
     "*.js": [
       "eslint --fix"
