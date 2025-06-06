@@ -1,6 +1,6 @@
 {
   "name": "@intelisysaviation/serverless-express",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "description": "This library enables InteliSys to utilize AWS Lambda and Amazon API Gateway to respond to web and API requests using the Node.js application framework.",
   "keywords": [
     "aws",
@@ -49,6 +49,8 @@
     ]
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.825.0",
+    "@aws-sdk/s3-request-presigner": "^3.825.0",
     "@commitlint/config-conventional": "^18.4.3",
     "@ryansonshine/commitizen": "^4.2.8",
     "@ryansonshine/cz-conventional-changelog": "^3.3.4",
@@ -59,6 +61,7 @@
     "@semantic-release/npm": "^11.0.2",
     "@semantic-release/release-notes-generator": "^12.1.0",
     "@types/aws-lambda": "^8.10.130",
+    "@types/debug": "^4.1.12",
     "@types/jest": "^29.5.11",
     "acorn": "^8.11.2",
     "commitlint": "^18.4.3",
@@ -95,5 +98,8 @@
     "commitizen": {
       "path": "./node_modules/@ryansonshine/cz-conventional-changelog"
     }
+  },
+  "dependencies": {
+    "debug": "^4.4.1"
   }
 }
